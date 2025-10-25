@@ -1,6 +1,7 @@
 import asyncio
 import time
 import random
+import msvcrt
 from typing import Optional
 
 # --- Mock Gemini ER1.5 Robotics API ---
@@ -34,14 +35,20 @@ class RobotAPI:
                 
             elif model_name == "light_candle":
                 # This is the task we will actively supervise.
-                # We simulate it taking 30 seconds to *time out*...
-                # but we'll *internally* set the candle to be "lit" after 12s
-                # to allow the supervisor to detect it.
+                # Simulate a long-running model that reports progress every 0.1s
+                # so we can observe that the supervisor and model run in parallel.
                 self.candle_is_actually_lit = False
-                self._lighting_start_time = time.time()
-                
-                await asyncio.sleep(30) # Total task timeout
-                
+
+                duration = 30.0
+                interval = 0.1
+                steps = int(duration / interval)
+
+                # Print a counter every `interval` seconds to simulate progress.
+                for i in range(steps):
+                    # Show which step we're on so output demonstrates concurrency.
+                    print(f"[Robot][light_candle] running... {i+1}")
+                    await asyncio.sleep(interval)
+
                 print("[Robot] 'light_candle' model timed out (finished naturally).")
 
             elif model_name == "retract_arm":
@@ -87,15 +94,9 @@ class RobotAPI:
         # This check is very fast (e.g., 0.5s inference)
         await asyncio.sleep(0.5)
         
-        # --- Simulation Logic ---
-        # If the 'light_candle' model is running,
-        # check if enough time has passed for it to be lit.
-        if self._lighting_start_time:
-            elapsed = time.time() - self._lighting_start_time
-            # Simulate the candle successfully lighting after 12 seconds
-            if elapsed > 12:
-                self.candle_is_actually_lit = True
-                
+        # Return the current sensor/perception state. There is no longer
+        # an internal timer that flips the flag — it must be set by
+        # perception or by manual input (keyboard listener).
         return self.candle_is_actually_lit
 
 # --- Supervisor Logic ---
@@ -106,35 +107,77 @@ async def monitor_candle_lighting(robot: RobotAPI, light_candle_task: asyncio.Ta
     It runs in parallel with the 'light_candle' model.
     """
     print("[Supervisor] MONITOR task started. Will check camera every 3s.")
-    
-    while not light_candle_task.done():
-        # Wait 3 seconds before the next check.
-        # We use a short, interruptible sleep to make the loop
-        # responsive if the main task finishes early.
-        try:
-            await asyncio.wait_for(asyncio.sleep(3), timeout=3)
-        except asyncio.TimeoutError:
-            pass # This is expected, just means 3s passed
 
-        # Check if the main task is *still* running before we query
-        if light_candle_task.done():
-            break
+    # Start a background task to listen for a single keypress during monitoring.
+    # We run the blocking msvcrt.getch in a thread using asyncio.to_thread so the
+    # event loop is not blocked. When a key is pressed we mark the candle lit and
+    # cancel the lighting task so the supervisor can proceed immediately.
+    keypress_task = asyncio.create_task(_wait_for_keypress_and_set(robot, light_candle_task))
 
-        print("[Supervisor] MONITOR: Checking camera for lit candle...")
-        if await robot.is_candle_lit():
-            print("[Supervisor] MONITOR: SUCCESS! Candle is lit.")
-            
-            # The candle is lit, so we cancel the 'light_candle' task.
-            if not light_candle_task.done():
-                print("[Supervisor] MONITOR: Cancelling 'light_candle' model now.")
-                light_candle_task.cancel()
-            
-            # Exit the monitoring loop
-            break
-        else:
-            print("[Supervisor] MONITOR: ...candle is not lit yet.")
+    try:
+        while not light_candle_task.done():
+            # Wait 3 seconds before the next check.
+            # We use a short, interruptible sleep to make the loop
+            # responsive if the main task finishes early.
+            try:
+                await asyncio.wait_for(asyncio.sleep(3), timeout=3)
+            except asyncio.TimeoutError:
+                pass  # This is expected, just means 3s passed
+
+            # Check if the main task is *still* running before we query
+            if light_candle_task.done():
+                break
+
+            print("[Supervisor] MONITOR: Checking camera for lit candle...")
+            if await robot.is_candle_lit():
+                print("[Supervisor] MONITOR: SUCCESS! Candle is lit.")
+
+                # The candle is lit, so we cancel the 'light_candle' task.
+                if not light_candle_task.done():
+                    print("[Supervisor] MONITOR: Cancelling 'light_candle' model now.")
+                    light_candle_task.cancel()
+
+                # Exit the monitoring loop
+                break
+            else:
+                print("[Supervisor] MONITOR: ...candle is not lit yet.")
+
+    finally:
+        # If the monitoring loop exits for any reason, ensure the keypress listener is stopped.
+        if not keypress_task.done():
+            keypress_task.cancel()
+            try:
+                await keypress_task
+            except asyncio.CancelledError:
+                pass
 
     print("[Supervisor] MONITOR task finished.")
+
+
+async def _wait_for_keypress_and_set(robot: RobotAPI, light_candle_task: Optional[asyncio.Task] = None):
+    """
+    Blocking call run in a thread to wait for a single keypress using msvcrt.getch.
+    Once a key is pressed, set the robot's candle flag to True and cancel the
+    lighting task (if provided) so the supervisor can react immediately.
+    """
+    try:
+        ch = await asyncio.to_thread(msvcrt.getch)
+        # decode bytes for user-friendly display
+        try:
+            key = ch.decode('utf-8', errors='replace')
+        except Exception:
+            key = repr(ch)
+
+        print(f"[Keyboard] Key pressed: {key!s}. Marking candle as lit.")
+        robot.candle_is_actually_lit = True
+
+        # If the light task is running, cancel it to allow supervisor to proceed.
+        if light_candle_task is not None and not light_candle_task.done():
+            print("[Keyboard] Cancelling 'light_candle' model due to manual key press.")
+            light_candle_task.cancel()
+
+    except Exception as e:
+        print(f"[Keyboard] Listener error: {e}")
 
 
 async def main():
