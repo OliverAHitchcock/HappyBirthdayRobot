@@ -64,6 +64,36 @@ python modules/supervisor/async_supervisor.py
 - The supervisor monitors for the candle being lit, either by perception or manual keypress.
 - Manual override: press any key to flip the candle lit variable and cancel the lighting task.
 
+## Enhanced Supervision: Vision Model & Real-Time Feedback
+
+Recent updates to the supervision script add real perception and feedback:
+
+- **Vision Model Integration:** The supervisor now uses a generative AI vision model to analyze camera images and provide feedback for each robot state.
+- **Camera Usage:** The robot captures images using your webcam to verify candle placement and flame status.
+- **Detailed Robot State:** The robot tracks multiple state variables (e.g., `claw_has_candle`, `is_flame_lit`, `is_candle_in_cake`, `is_arm_retracted`, and `instructions`) for richer supervision and feedback.
+- **Feedback Loop:** The supervisor queries the vision model after each action, parses the response, and updates the robot's state accordingly.
+
+### Example: Vision Model Feedback
+After placing the candle, the supervisor captures an image and sends it to the vision model. The model returns a JSON response with detected objects, next state, and instructions, which the supervisor uses to decide the next action.
+
+```python
+# Capture image and run vision model
+await take_picture(img_path)
+response_json = await robot.query_vision_model(img_path)
+robot.set_robot_state(response_json)
+```
+
+### Updated Tutorial Steps
+- The supervisor will now use your webcam to capture images and verify each step.
+- Vision model feedback is used to determine if the candle is placed, lit, and if the arm should retract.
+- The robot's state is updated in real time based on vision model output.
+
+#### Example Output (Vision Model)
+```
+{"current_state": "pick_up_candle", "next_state": "light_candle", ...}
+Instructions: The claw should light the candle next.
+```
+
 ## Asynchronous Supervision: How It Works
 
 A key innovation in HappyBirthdayRobot is its use of asynchronous programming to supervise robotic models in real time. This approach allows the supervisor to monitor, intervene, and coordinate multiple tasks concurrently—just like a real-world robotics system.
