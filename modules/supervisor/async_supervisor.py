@@ -1,12 +1,100 @@
 import asyncio
 import time
 import random
-import msvcrt
 from typing import Optional
+import sys
+import cv2
+# from cv2 import *
+from enum import Enum
+import os
+from dotenv import load_dotenv, find_dotenv
+from pathlib import Path
+from helper import *
+from google import genai
+from google.genai import types
+from supervisor import run_vision_model
+if sys.platform.startswith('win'):
+    import msvcrt
+else:
+    import getch
+
+# Get current directory
+current_directory = os.getcwd()
+images_directory = os.path.join(current_directory, "modules/supervisor/images/")
+img_name = "frame.jpg"
+img_path = os.path.join(images_directory, img_name)
+# Load the environment variables
+load_dotenv(Path(f"{current_directory}/.env"))
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL_ID = "gemini-robotics-er-1.5-preview"
+PROMPT = """
+          Point to no more than 10 items in the image. The label returned
+          should be an identifying name for the object detected.
+          The points are in [y, x] format
+          normalized to 0-1000.
+
+          The objects of interest are:
+          - robot claw
+          - lighter, attached to robot claw
+          - candles
+          - toy cake / cupcake
+
+          You will provide feedback to submodels that execute robot claw movement.
+          There are the following states the robot claw can take:
+          - IDLE = "idle"
+          - PICK_UP_CANDLE = "pick_up_candle"
+          - LIGHT_CANDLE = "light_candle"
+          - RETRACT_ARM = "retract_arm"
+          Objective:
+            - The claw should pick up the candle, place it in the cake.
+            - The claw should light the candle.
+            - The claw should retract the arm.
+        You should direct the claw to complete the objective by outputting the next state.
+
+        If the image does not contain any of the objects of interest, return the current state and the next state as "IDLE", and false for all the other fields.
+          Return the current state, next state of the robot claw, the points, and the instructions in the json format:
+          {"current_state": <current_state>,
+          {"next_state": <next_state>,
+          "points": [{"point": <point>, "label": <label>}, ...],
+          "claw_has_candle": <claw_has_candle>,
+          "is_flame_lit": <is_flame_lit>,
+          "is_candle_in_cake": <is_candle_in_cake>,
+          "is_arm_retracted": <is_arm_retracted>,
+          "instructions": <instructions>}
+        """
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+def read_single_key():
+    if sys.platform.startswith('win'):
+        return msvcrt.getch().decode('utf-8')
+    else:
+        return getch.getch().decode('utf-8')
+
+async def take_picture(img_path: str):
+    # Open the default camera
+    cam = cv2.VideoCapture(0)
+    print("Camera opened")
+    print("Waiting for 2 seconds...")
+    time.sleep(2)
+    # Capture one frame
+    ret, frame = cam.read()
+    print("Frame captured")
+    # Save the frame
+    cv2.imwrite(img_path, frame)
+    # Close the camera
+    cam.release()
 
 # --- Mock Gemini ER1.5 Robotics API ---
 # This class simulates the robot's API, allowing us to build
 # and test the supervisor logic.
+
+class State(Enum):
+    HOME = "home"
+    PICK_UP_CANDLE = "pick_up_candle"
+    LIGHT_CANDLE = "light_candle"
+    RETRACT_ARM = "retract_arm"
+    ERROR = "error"
 
 class RobotAPI:
     """
@@ -14,11 +102,25 @@ class RobotAPI:
     It provides asynchronous methods to run models and query sensors.
     """
     def __init__(self):
-        self.robot_state = "home"
+        self.robot_state = State.HOME
         self._lighting_start_time: Optional[float] = None
         self.candle_is_actually_lit = False
+        self.claw_has_candle = False
+        self.is_flame_lit = False
+        self.is_candle_in_cake = False
+        self.is_arm_retracted = False
+        self.instructions = ""
         print("RobotAPI initialized. State: home")
 
+
+    def set_robot_state(self, response_json: dict):
+        self.claw_has_candle = response_json.get("claw_has_candle", False)
+        self.is_flame_lit = response_json.get("is_flame_lit", False)
+        self.is_candle_in_cake = response_json.get("is_candle_in_cake", False)
+        self.is_arm_retracted = response_json.get("is_arm_retracted", False)
+        self.instructions = response_json.get("instructions", "")
+        if
+        
     async def run_model(self, model_name: str) -> bool:
         """
         Simulates the execution of a long-running robotics model.
@@ -30,7 +132,7 @@ class RobotAPI:
         try:
             if model_name == "place_candle":
                 # Simulate the time taken to place the candle
-                await asyncio.sleep(10)
+                await asyncio.sleep(2)
                 print("[Robot] 'place_candle' model finished.")
                 
             elif model_name == "light_candle":
@@ -71,20 +173,26 @@ class RobotAPI:
             if model_name == "light_candle":
                 self._lighting_start_time = None
 
-    async def query_vision_model(self, prompt: str) -> bool:
-        """
-        Simulates using a vision model (VLM) to answer a verification question.
-        """
-        print(f"[Robot] Querying vision model: '{prompt}'")
-        # Simulate network/inference latency
-        await asyncio.sleep(1.5)
-        
-        # For this example, we'll just approve the placement
-        if "candle correctly placed" in prompt:
-            print("[Robot] Vision model result: True")
-            return True
-            
-        return False
+    async def query_vision_model(self, img_path: str) -> bool:
+        with open(img_path, 'rb') as f:
+            image_bytes = f.read()
+        image_response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type='image/jpeg',
+                ),
+                PROMPT
+            ],
+            config = types.GenerateContentConfig(
+                temperature=0.5,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            )
+        )
+        return json_repair.loads(image_response.text)
+
+
 
     async def is_candle_lit(self) -> bool:
         """
@@ -92,12 +200,16 @@ class RobotAPI:
         This is the core perception function for the supervision loop.
         """
         # This check is very fast (e.g., 0.5s inference)
-        await asyncio.sleep(0.5)
-        
-        # Return the current sensor/perception state. There is no longer
-        # an internal timer that flips the flag — it must be set by
-        # perception or by manual input (keyboard listener).
-        return self.candle_is_actually_lit
+        # await asyncio.sleep(10)
+        # Open the default camera
+        await take_picture(img_path)
+        # Run the vision model
+        # response_json = run_vision_model(img_path)
+        # Set the robot state
+        # self.set_robot_state(response_json)
+        self.is_flame_lit = False
+        # Return the response
+        return self.is_flame_lit
 
 # --- Supervisor Logic ---
 
@@ -161,12 +273,12 @@ async def _wait_for_keypress_and_set(robot: RobotAPI, light_candle_task: Optiona
     lighting task (if provided) so the supervisor can react immediately.
     """
     try:
-        ch = await asyncio.to_thread(msvcrt.getch)
-        # decode bytes for user-friendly display
-        try:
-            key = ch.decode('utf-8', errors='replace')
-        except Exception:
-            key = repr(ch)
+        ch = await asyncio.to_thread(read_single_key)
+        # # decode bytes for user-friendly display
+        # try:
+        #     key = ch.decode('utf-8', errors='replace')
+        # except Exception:
+        #     key = repr(ch)
 
         print(f"[Keyboard] Key pressed: {key!s}. Marking candle as lit.")
         robot.candle_is_actually_lit = True
@@ -188,14 +300,13 @@ async def main():
 
     try:
         # --- Task 1: Place Candle ---
-        print("\n--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE ---")
-        await robot.run_model("place_candle")
-        print("--- SUPERVISOR: TASK 1 COMPLETE ---")
+        print("\n--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE AND VERIFY PLACEMENT---")
+        await robot.run_model(State.PICK_UP_CANDLE)
 
-
-        # --- Task 2: Verify Placement ---
-        print("\n--- SUPERVISOR: STARTING TASK 2: VERIFY PLACEMENT ---")
-        is_placed = await robot.query_vision_model("Is the candle correctly placed in the cupcake?")
+        print("\n--- SUPERVISOR: STARTING VERIFICATION OF PLACEMENT ---")
+        # is_placed = await robot.query_vision_model()
+        # is_placed = False
+        is_placed = True
         
         if not is_placed:
             print("--- SUPERVISOR: VERIFICATION FAILED. Aborting mission. ---")
@@ -210,7 +321,7 @@ async def main():
         # 1. Create the task for the 'light_candle' model.
         #    This starts the task running in the background.
         light_candle_task = asyncio.create_task(
-            robot.run_model("light_candle")
+            robot.run_model(State.LIGHT_CANDLE)
         )
         
         # 2. Create the concurrent monitoring task.
