@@ -219,3 +219,7 @@ main.py
 pyproject.toml
 .DS_Store
 .DS_Store
+
+
+# Robot enviornments
+env/outputs
