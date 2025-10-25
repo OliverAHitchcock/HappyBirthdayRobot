@@ -1,0 +1,212 @@
+project_folder := "/home/ubuntu"
+
+default:
+  just --list
+
+teleoperate:
+  uv run lerobot-teleoperate \
+    --robot.type=so101_follower --robot.port=/dev/ttyACM4 --robot.id=ht_follower_arm  \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=ht_leader_arm \
+    --display_data=true
+
+calibrate-follower:
+  uv run lerobot-calibrate \
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=ht_follower_arm
+
+calibrate-leader:
+  uv run lerobot-calibrate \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 \
+    --teleop.id=ht_leader_arm
+
+record num_episodes='50' id='record-candle-varied' task='Grab the candle and place it into the cake.':
+  uv run lerobot-record --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM4 --robot.id=ht_follower_arm \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 1, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
+        "top": {"type": "opencv", "index_or_path": 3, "width": 960, "height": 540, "fps": 30}}'  \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 --teleop.id=ht_leader_arm \
+    --display_data=true \
+    --dataset.repo_id=felixmayor/{{ id }} \
+    --dataset.num_episodes={{ num_episodes }} \
+    --dataset.reset_time_s=10 \
+    --dataset.episode_time_s=60 \
+    --dataset.single_task="{{ task }}"
+
+record-lighter num_episodes='29' id='record-lighter' task='Light the candle.':
+  uv run lerobot-record --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM4 --robot.id=ht_follower_arm \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 --teleop.id=ht_leader_arm \
+    --display_data=true \
+    --dataset.repo_id=felixmayor/{{ id }} \
+    --dataset.num_episodes={{ num_episodes }} \
+    --dataset.reset_time_s=10 \
+    --dataset.episode_time_s=60 \
+    --dataset.single_task="{{ task }}" \
+    --resume=true
+
+train-act:
+  uv run lerobot-train \
+      --dataset.repo_id=felixmayor/record-candle-mei2 \
+      --policy.type=act \
+      --output_dir={{ project_folder }}/outputs/act_candle \
+      --job_name=ACT_candle_training \
+      --policy.repo_id=gyger/act_candle2 \
+      --wandb.enable=true \
+      --steps=30000 \
+      --batch_size=32 \
+      --save_freq=5000 \
+      --policy.device=cuda
+
+refine-act:
+  uv run lerobot-train \
+      --dataset.repo_id=felixmayor/record-candle-varied \
+      --policy.type=act \
+      --policy.pretrained_path=gyger/act_candle \
+      --output_dir={{ project_folder }}/outputs/act_candle_refine \
+      --job_name=ACT_candle_refine_training \
+      --policy.repo_id=gyger/act_candle_varied \
+      --wandb.enable=true \
+      --steps=10000 \
+      --batch_size=32 \
+      --save_freq=5000 \
+      --policy.device=cuda
+
+train-pi05:
+  uv run lerobot-train \
+      --dataset.repo_id=felixmayor/orange_cube_merged  \
+      --policy.type=pi05 \
+      --output_dir={{ project_folder }}/outputs/pi05_oc_training \
+      --job_name=pi05_oc_training \
+      --policy.repo_id={{ project_folder }}/outputs/pi05_orange_cube \
+      --policy.pretrained_path=lerobot/pi05_base \
+      --policy.compile_model=true \
+      --policy.gradient_checkpointing=true \
+      --wandb.enable=true \
+      --policy.dtype=bfloat16 \
+      --steps=3000 \
+      --policy.scheduler_decay_steps=3000 \
+      --policy.device=cuda \
+      --batch_size=32
+
+train-grootn15:
+  uv run lerobot-train \
+      --dataset.repo_id=felixmayor/record-candle-mei2 \
+      --job_name=groot_candle_training \
+      --output_dir={{ project_folder }}/outputs/gr00t_candle_training \
+      --policy.type=groot \
+      --policy.push_to_hub=true \
+      --policy.repo_id={{ project_folder }}/outputs/groot_candle \
+      --policy.tune_diffusion_model=false \
+      --wandb.enable=true \
+      --wandb.disable_artifact=true \
+      --save_checkpoint=true \
+      --log_freq=100 \
+      --save_freq=5000 \
+      --steps=20000 \
+      --policy.device=cuda \
+      --batch_size=32 \
+      --env.type=gym_manipulator \
+      --env.processor.image_preprocessing.crop_params_dict='{ \
+          "observation.images.fpv": [0, 768, 128, 896], \
+          "observation.images.top": [0, 540, 210, 750] \
+      }' \
+      --env.processor.image_preprocessing.resize_size='[256, 256]'
+
+run-pi05:
+  uv run lerobot-record \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM0 --robot.id=ht_follower_arm \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 480, "height": 640, "fps": 30, "rotation": "ROTATE_270"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --display_data=true \
+    --dataset.push_to_hub=False \
+    --dataset.repo_id=outputs/eval_so101 \
+    --dataset.single_task="Pick up the lid." \
+    --policy.path=gyger/pi05_so101_orange
+
+run-candle-act task='Grab the candle and place it into the cake.':
+  uv run lerobot-record \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM4 --robot.id=ht_follower_arm \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --display_data=true \
+    --dataset.push_to_hub=False \
+    --dataset.repo_id=outputs/eval_so101_candle \
+    --policy.path=gyger/act_candle_refined \
+    --dataset.episode_time_s=3600 \
+    --dataset.single_task="{{ task }}"
+
+run-lighter-act task='Light the candle.':
+  rm -r outputs/eval_so101_candle | \
+  uv run lerobot-record \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM0 --robot.id=ht_follower_arm \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --display_data=true \
+    --dataset.push_to_hub=False \
+    --dataset.repo_id=outputs/eval_so101_candle \
+    --policy.path=gyger/act_lighter \
+    --dataset.episode_time_s=60 \
+    --dataset.single_task="{{ task }}"
+
+run-pi05-base:
+  uv run lerobot-record \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.cameras='{ \
+        "fpv": {"type": "opencv", "index_or_path": 2, "width": 480, "height": 640, "fps": 30, "rotation": "ROTATE_270"}, \
+        "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
+    --robot.id=linqs_follower_arm \
+    --display_data=true \
+    --dataset.push_to_hub=False \
+    --dataset.repo_id=outputs/eval_so101 \
+    --dataset.single_task="Pick up the lid." \
+    --policy.path=lerobot/pi05_base
+
+setup-uv:
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+setup-gr00t:
+  cd {{ project_folder }} && \
+  sudo apt install svt-av1 ffmpeg && \
+  UV_PYTHON=python3.10 uv init --bare --python-pin && \
+  mkdir outputs && \
+  mkdir vendor && cd vendor && \
+  git config --global credential.helper store && \
+  git clone https://github.com/huggingface/lerobot.git && \
+  cd lerobot && \
+  git checkout v0.4.0 && \
+  uv venv && \
+  uv pip install "torch>=2.2.1,<2.8.0" "torchvision>=0.21.0,<0.23.0" --no-build-isolation && \
+  uv pip install ninja "packaging>=24.2,<26.0"s && \
+  uv pip install "flash-attn>=2.5.9,<3.0.0" --no-build-isolation && \
+  uv pip install -e .[all,groot]
+
+setup:
+  cd {{ project_folder }} && \
+  sudo apt install svt-av1 ffmpeg && \
+  UV_PYTHON=python3.10 uv init --bare --python-pin && \
+  mkdir outputs && \
+  mkdir vendor && cd vendor && \
+  git config --global credenital.helper store && \
+  git clone https://github.com/huggingface/lerobot.git && \
+  cd lerobot && \
+  git checkout v0.4.0 && \
+  uv venv && \
+  uv pip install -e .[all]
