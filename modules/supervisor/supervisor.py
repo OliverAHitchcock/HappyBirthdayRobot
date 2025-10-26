@@ -108,6 +108,7 @@ def run_vision_model(img_path: str):
     # 
     print(image_response.text)
     response_json = parse_json(image_response.text)
+    return response_json
     print(response_json)
     print(type(response_json))
 

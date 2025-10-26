@@ -51,9 +51,8 @@ PROMPT = """
             - The claw should light the candle.
             - The claw should retract the arm.
         You should direct the claw to complete the objective by outputting the next state.
-
-        If the image does not contain any of the objects of interest, return the current state and the next state as "IDLE", and false for all the other fields.
-          Return the current state, next state of the robot claw, the points, and the instructions in the json format:
+        
+        Return the current state, next state of the robot claw, the points, and the instructions in the json format:
           {"current_state": <current_state>,
           {"next_state": <next_state>,
           "points": [{"point": <point>, "label": <label>}, ...],
@@ -62,6 +61,8 @@ PROMPT = """
           "is_candle_in_cake": <is_candle_in_cake>,
           "is_arm_retracted": <is_arm_retracted>,
           "instructions": <instructions>}
+
+        If the image does not contain any of the objects of interest, return the current state and the next state as "IDLE", and false for all the other fields.
         """
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -90,11 +91,10 @@ async def take_picture(img_path: str):
 # and test the supervisor logic.
 
 class State(Enum):
-    HOME = "home"
-    PICK_UP_CANDLE = "pick_up_candle"
+    IDLE = "idle"
+    PLACE_CANDLE = "place_candle"
     LIGHT_CANDLE = "light_candle"
     RETRACT_ARM = "retract_arm"
-    ERROR = "error"
 
 class RobotAPI:
     """
@@ -102,7 +102,8 @@ class RobotAPI:
     It provides asynchronous methods to run models and query sensors.
     """
     def __init__(self):
-        self.robot_state = State.HOME
+        # self.current_state = State.
+        self.current_state = State.IDLE
         self._lighting_start_time: Optional[float] = None
         self.candle_is_actually_lit = False
         self.claw_has_candle = False
@@ -110,16 +111,19 @@ class RobotAPI:
         self.is_candle_in_cake = False
         self.is_arm_retracted = False
         self.instructions = ""
-        print("RobotAPI initialized. State: home")
+        print("RobotAPI initialized. State: idle")
 
 
     def set_robot_state(self, response_json: dict):
+        if (type(response_json) != dict or response_json is None):
+            return
+        # self.next_state = response_json.get("next_state", State.IDLE)
+        self.current_state = response_json.get("next_state", State.IDLE)
         self.claw_has_candle = response_json.get("claw_has_candle", False)
         self.is_flame_lit = response_json.get("is_flame_lit", False)
         self.is_candle_in_cake = response_json.get("is_candle_in_cake", False)
         self.is_arm_retracted = response_json.get("is_arm_retracted", False)
         self.instructions = response_json.get("instructions", "")
-        if
         
     async def run_model(self, model_name: str) -> bool:
         """
@@ -130,18 +134,26 @@ class RobotAPI:
         self.robot_state = f"running_{model_name}"
         
         try:
-            if model_name == "place_candle":
+            if model_name == State.PLACE_CANDLE:
                 # Simulate the time taken to place the candle
-                await asyncio.sleep(2)
+
+                duration = 20.0
+                interval = 0.1
+                steps = int(duration / interval)
+
+                # Print a counter every `interval` seconds to simulate progress.
+                for i in range(steps):
+                    # Show which step we're on so output demonstrates concurrency.
+                    print(f"[Robot][light_candle] running... {i+1}")
+                    await asyncio.sleep(interval)
                 print("[Robot] 'place_candle' model finished.")
                 
-            elif model_name == "light_candle":
+            elif model_name == State.LIGHT_CANDLE:
                 # This is the task we will actively supervise.
                 # Simulate a long-running model that reports progress every 0.1s
                 # so we can observe that the supervisor and model run in parallel.
-                self.candle_is_actually_lit = False
 
-                duration = 30.0
+                duration = 10.0
                 interval = 0.1
                 steps = int(duration / interval)
 
@@ -153,19 +165,19 @@ class RobotAPI:
 
                 print("[Robot] 'light_candle' model timed out (finished naturally).")
 
-            elif model_name == "retract_arm":
+            elif model_name == State.RETRACT_ARM:
                 await asyncio.sleep(4)
                 print("[Robot] 'retract_arm' model finished. Arm is home.")
 
-            self.robot_state = "idle"
+            self.robot_state = State.IDLE
             return True # Task completed successfully
 
         except asyncio.CancelledError:
             print(f"[Robot] 'run_model({model_name})' was CANCELLED by supervisor.")
-            self.robot_state = "cancelling"
+            self.robot_state = State.IDLE
             # Simulate a brief period to safely stop the model
             await asyncio.sleep(1)
-            self.robot_state = "idle"
+            self.robot_state = State.IDLE
             raise # Re-raise the exception so the supervisor knows it was cancelled
 
         finally:
@@ -193,25 +205,140 @@ class RobotAPI:
         return json_repair.loads(image_response.text)
 
 
-
-    async def is_candle_lit(self) -> bool:
-        """
-        Simulates a fast, repeating check of the camera.
-        This is the core perception function for the supervision loop.
-        """
-        # This check is very fast (e.g., 0.5s inference)
-        # await asyncio.sleep(10)
+    async def picture_and_run_vision_model(self) -> dict:
         # Open the default camera
         await take_picture(img_path)
         # Run the vision model
         # response_json = run_vision_model(img_path)
         # Set the robot state
         # self.set_robot_state(response_json)
-        self.is_flame_lit = False
-        # Return the response
-        return self.is_flame_lit
+        response_json = {"current_state": State.IDLE, "next_state": State.LIGHT_CANDLE, "points": [], "claw_has_candle": False, "is_flame_lit": False, "is_candle_in_cake": True, "is_arm_retracted": False, "instructions": ""}
+        return response_json
 
 # --- Supervisor Logic ---
+
+async def monitor_general(
+    robot: RobotAPI, 
+    main_task: asyncio.Task, 
+    check_interval: float = 5.0,
+    function_to_check: callable=lambda x: x.is_candle_in_cake
+):
+    """
+    Concurrent supervision task.
+    Periodically checks the camera to see if the candle has been placed.
+    Cancels the main task early if success is detected.
+    """
+    print(f"[Supervisor] Monitor started. Checking every {check_interval:.1f}s.")
+
+    try:
+        while not main_task.done():
+            # Wait for either the interval to elapse or the task to finish early
+            done, _ = await asyncio.wait(
+                [main_task],
+                timeout=check_interval
+            )
+            if done:  # main task completed early
+                break
+
+            print("[Supervisor] Checking camera for candle...")
+            result = await robot.picture_and_run_vision_model()
+            robot.set_robot_state(result)
+            if function_to_check(robot):
+                print("[Supervisor] ✅ Success, stopping main task.")
+                main_task.cancel()
+                break
+            else:
+                print("[Supervisor] ❌ Not success, continuing...")
+
+    except asyncio.CancelledError:
+        print("[Supervisor] Monitor was cancelled.")
+        raise
+
+    finally:
+        print("[Supervisor] Monitor stopped.")
+
+
+async def monitor_place_candle(
+    robot: RobotAPI, 
+    place_candle_task: asyncio.Task, 
+    check_interval: float = 5.0
+):
+    """
+    Concurrent supervision task.
+    Periodically checks the camera to see if the candle has been placed.
+    Cancels the main task early if success is detected.
+    """
+    print(f"[Supervisor] Monitor started. Checking every {check_interval:.1f}s.")
+
+    try:
+        while not place_candle_task.done():
+            # Wait for either the interval to elapse or the task to finish early
+            done, _ = await asyncio.wait(
+                [place_candle_task],
+                timeout=check_interval
+            )
+            if done:  # main task completed early
+                break
+
+            print("[Supervisor] Checking camera for candle...")
+            result = await robot.picture_and_run_vision_model()
+            robot.set_robot_state(result)
+            if robot.is_candle_in_cake:
+                print("[Supervisor] ✅ Candle detected in cake! Stopping main task.")
+                place_candle_task.cancel()
+                break
+            else:
+                print("[Supervisor] ❌ Candle not detected yet, continuing...")
+
+    except asyncio.CancelledError:
+        print("[Supervisor] Monitor was cancelled.")
+        raise
+
+    finally:
+        print("[Supervisor] Monitor stopped.")
+
+
+# async def monitor_place_candle(robot: RobotAPI, place_candle_task: asyncio.Task, check_interval: float = 10.0):
+#     """
+#     This is the concurrent supervision task.
+#     It runs in parallel with the 'place_candle' model and checks camera every check_interval seconds.
+    
+#     Args:
+#         robot: RobotAPI instance
+#         place_candle_task: The main task being monitored
+#         check_interval: Time in seconds between camera checks (default: 10.0)
+#     """
+#     print(f"[Supervisor] MONITOR task started. Will check camera every {check_interval}s.")
+
+#     try:
+#         while not place_candle_task.done():
+#             # Wait for the specified interval before the next check
+#             # Use interruptible sleep to make the loop responsive if main task finishes early
+#             try:
+#                 await asyncio.wait_for(asyncio.sleep(check_interval), timeout=check_interval)
+#             except asyncio.TimeoutError:
+#                 pass  # This is expected, just means the interval passed
+
+#             # Check if the main task is still running before we query
+#             if place_candle_task.done():
+#                 break
+
+#             print("[Supervisor] MONITOR: Checking camera for candle in the cake...")
+#             response_json = await robot.picture_and_run_vision_model()
+#             if robot.is_candle_in_cake:
+#                 print("[Supervisor] MONITOR: SUCCESS! Candle is in the cake.")
+#                 # Cancel the main task since goal is achieved
+#                 if not place_candle_task.done():
+#                     print("[Supervisor] MONITOR: Cancelling 'place_candle' model now.")
+#                     place_candle_task.cancel()
+#                 break
+#             else:
+#                 print("[Supervisor] MONITOR: ...candle is not in cake yet.")
+
+#     finally:
+#         pass
+#     print("[Supervisor] MONITOR task finished.")
+#     print('robot.is_candle_in_cake', robot.is_candle_in_cake)
 
 async def monitor_candle_lighting(robot: RobotAPI, light_candle_task: asyncio.Task):
     """
@@ -224,11 +351,14 @@ async def monitor_candle_lighting(robot: RobotAPI, light_candle_task: asyncio.Ta
     # We run the blocking msvcrt.getch in a thread using asyncio.to_thread so the
     # event loop is not blocked. When a key is pressed we mark the candle lit and
     # cancel the lighting task so the supervisor can proceed immediately.
-    keypress_task = asyncio.create_task(_wait_for_keypress_and_set(robot, light_candle_task))
+    # keypress_task = asyncio.create_task(_wait_for_keypress_and_set(robot, light_candle_task))
 
     try:
         while not light_candle_task.done():
-            # Wait 3 seconds before the next check.
+            '''
+            This is the time period between checks of the camera for the lit candle.
+            '''
+            # Wait 10 seconds before the next check.
             # We use a short, interruptible sleep to make the loop
             # responsive if the main task finishes early.
             try:
@@ -241,9 +371,10 @@ async def monitor_candle_lighting(robot: RobotAPI, light_candle_task: asyncio.Ta
                 break
 
             print("[Supervisor] MONITOR: Checking camera for lit candle...")
-            if await robot.is_candle_lit():
+            response_json = await robot.picture_and_run_vision_model()
+            robot.set_robot_state(response_json)
+            if robot.is_flame_lit:
                 print("[Supervisor] MONITOR: SUCCESS! Candle is lit.")
-
                 # The candle is lit, so we cancel the 'light_candle' task.
                 if not light_candle_task.done():
                     print("[Supervisor] MONITOR: Cancelling 'light_candle' model now.")
@@ -255,13 +386,7 @@ async def monitor_candle_lighting(robot: RobotAPI, light_candle_task: asyncio.Ta
                 print("[Supervisor] MONITOR: ...candle is not lit yet.")
 
     finally:
-        # If the monitoring loop exits for any reason, ensure the keypress listener is stopped.
-        if not keypress_task.done():
-            keypress_task.cancel()
-            try:
-                await keypress_task
-            except asyncio.CancelledError:
-                pass
+        pass
 
     print("[Supervisor] MONITOR task finished.")
 
@@ -298,72 +423,160 @@ async def main():
     """
     robot = RobotAPI()
 
-    try:
-        # --- Task 1: Place Candle ---
-        print("\n--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE AND VERIFY PLACEMENT---")
-        await robot.run_model(State.PICK_UP_CANDLE)
+    # TODO: Implement the FSM
+    robot.current_state = State.PLACE_CANDLE
+    is_first_time = True
+    while True:
+    # INSERT_YOUR_CODE
+        # Finite State Machine for Supervising the Candle Task
+        # States: IDLE -> PLACE_CANDLE -> VERIFY_PLACEMENT -> LIGHT_CANDLE -> RETRACT_ARM
+        if is_first_time:
+            print('back in main loop', robot.current_state)
+        if robot.current_state == State.IDLE:
+            response_json = await robot.picture_and_run_vision_model()
+            if response_json is None or type(response_json) != dict or response_json.get("next_state") == State.IDLE:
+                print("--- SUPERVISOR: No objects of interest found. ---")
+                continue
+            robot.set_robot_state(response_json)
+            await asyncio.sleep(5)
+            if robot.current_state != State.IDLE:
+                is_first_time = True
+                print("[Supervisor][FSM] Proceeding to place the candle.")
+            
+        elif robot.current_state == State.PLACE_CANDLE:
+            if is_first_time:
+                place_candle_task = asyncio.create_task(robot.run_model(State.PLACE_CANDLE))
+                # 2. Create the concurrent monitoring task.
+                #    We pass it a reference to the 'light_candle_task' so it can cancel it.
+                # monitor_place_candle_task = asyncio.create_task(monitor_place_candle(robot, place_candle_task, check_interval=5.0))
+                monitor_place_candle_task = asyncio.create_task(monitor_general(robot, place_candle_task, check_interval=5.0, function_to_check=lambda x: x.is_candle_in_cake))
 
-        print("\n--- SUPERVISOR: STARTING VERIFICATION OF PLACEMENT ---")
-        # is_placed = await robot.query_vision_model()
-        # is_placed = False
-        is_placed = True
-        
-        if not is_placed:
-            print("--- SUPERVISOR: VERIFICATION FAILED. Aborting mission. ---")
-            return
-        
-        print("--- SUPERVISOR: TASK 2 COMPLETE. Placement verified. ---")
+                # 3. Wait for the monitoring task to complete.
+                #    The monitor will exit when EITHER the candle is lit
+                #    OR the 'place_candle' task finishes on its own.
+                await monitor_place_candle_task
+                    
+                # 4. We must also 'await' the main task.
+                #    - If it was cancelled, this will raise asyncio.CancelledError.
+                #    - If it finished normally (timed out), this will return its result.
+                #    This is crucial for proper exception handling.
+                is_first_time = False
+            try:
+                await place_candle_task
+            except asyncio.CancelledError:
+                print("[Supervisor][FSM] 'place_candle_task' was cancelled due to interrupt or success.")
+                robot.current_state = State.LIGHT_CANDLE
+                is_first_time = True
+                print("[Supervisor][FSM] Place candle process complete.")
+            if robot.is_candle_in_cake:
+                robot.current_state = State.LIGHT_CANDLE
+                is_first_time = True
+                print("[Supervisor][FSM] Candle is in the cake. Proceeding to light the candle.")
 
+        elif robot.current_state == State.LIGHT_CANDLE:
+            if is_first_time:
+                light_candle_task = asyncio.create_task(robot.run_model(State.LIGHT_CANDLE))
+                # monitor_task = asyncio.create_task(monitor_candle_lighting(robot, light_candle_task))
+                monitor_task = asyncio.create_task(monitor_general(robot, light_candle_task, check_interval=5.0, function_to_check=lambda x: x.is_flame_lit))
+                await monitor_task
+                is_first_time = False
+            try:
+                await light_candle_task
+            except asyncio.CancelledError:
+                print("[Supervisor][FSM] 'light_candle_task' was cancelled due to interrupt or success.")
+                print("[Supervisor][FSM] Candle light process complete.")
+                robot.current_state = State.RETRACT_ARM
+                is_first_time = True
+                print("[Supervisor][FSM] Candle is lit. Proceeding to retract the arm.")
+            if robot.is_flame_lit:
+                robot.current_state = State.RETRACT_ARM
+                is_first_time = True
+                print("[Supervisor][FSM] Candle is lit. Proceeding to retract the arm.")
 
-        # --- Task 3: Light Candle (with Active Supervision) ---
-        print("\n--- SUPERVISOR: STARTING TASK 3: LIGHT CANDLE (with active monitoring) ---")
-        
-        # 1. Create the task for the 'light_candle' model.
-        #    This starts the task running in the background.
-        light_candle_task = asyncio.create_task(
-            robot.run_model(State.LIGHT_CANDLE)
-        )
-        
-        # 2. Create the concurrent monitoring task.
-        #    We pass it a reference to the 'light_candle_task' so it can cancel it.
-        monitor_task = asyncio.create_task(
-            monitor_candle_lighting(robot, light_candle_task)
-        )
-
-        # 3. Wait for the monitoring task to complete.
-        #    The monitor will exit when EITHER the candle is lit
-        #    OR the 'light_candle' task finishes on its own.
-        await monitor_task
-        
-        # 4. We must also 'await' the main task.
-        #    - If it was cancelled, this will raise asyncio.CancelledError.
-        #    - If it finished normally (timed out), this will return its result.
-        #    This is crucial for proper exception handling.
-        try:
-            await light_candle_task
-        except asyncio.CancelledError:
-            print("[Supervisor] Confirmed 'light_candle_task' was successfully cancelled.")
-
-        print("--- SUPERVISOR: TASK 3 COMPLETE (or cancelled) ---")
-
-
-        # --- Task 4: Retract Arm (Conditional) ---
-        # This is the final step: only retract if the candle was lit.
-        # We check the robot's state, which was set by the perception check.
-        
-        if robot.candle_is_actually_lit:
-            print("\n--- SUPERVISOR: STARTING TASK 4: RETRACT ARM ---")
+        elif cur_state == State.RETRACT_ARM:
+            print("\n[Supervisor][FSM] State: RETRACT_ARM")
             await robot.run_model("retract_arm")
-            print("--- SUPERVISOR: TASK 4 COMPLETE ---")
-            print("\nMISSION SUCCESSFUL. Robot is home.")
-        else:
-            print("\n--- SUPERVISOR: Candle was not lit. Mission failed. ---")
-            print("--- SUPERVISOR: Arm will not retract. Manual intervention required. ---")
+            print("[Supervisor][FSM] RETRACT_ARM complete. Mission accomplished!")
+            break
 
-    except Exception as e:
-        print(f"\n--- SUPERVISOR: An unexpected error occurred: {e} ---")
-        # Add any emergency stop logic here
-        await robot.run_model("retract_arm") # Example of a safety fallback
+        else:
+            print(f"[Supervisor][FSM] Unknown state: {cur_state}")
+            break
+    # end TODO
+
+'''
+working fallback code
+'''
+
+    # try:
+    #     # --- Task 1: Place Candle ---
+    #     print("\n--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE ---")
+    #     await robot.run_model("place_candle")
+    #     print("--- SUPERVISOR: TASK 1 COMPLETE ---")
+
+
+    #     # --- Task 2: Verify Placement ---
+    #     print("\n--- SUPERVISOR: STARTING TASK 2: VERIFY PLACEMENT ---")
+    #     # is_placed = await robot.query_vision_model()
+    #     # is_placed = False
+    #     is_placed = True
+        
+    #     if not is_placed:
+    #         print("--- SUPERVISOR: VERIFICATION FAILED. Aborting mission. ---")
+    #         return
+        
+    #     print("--- SUPERVISOR: TASK 2 COMPLETE. Placement verified. ---")
+
+
+    #     # --- Task 3: Light Candle (with Active Supervision) ---
+    #     print("\n--- SUPERVISOR: STARTING TASK 3: LIGHT CANDLE (with active monitoring) ---")
+        
+    #     # 1. Create the task for the 'light_candle' model.
+    #     #    This starts the task running in the background.
+    #     light_candle_task = asyncio.create_task(
+    #         robot.run_model("light_candle")
+    #     )
+        
+    #     # 2. Create the concurrent monitoring task.
+    #     #    We pass it a reference to the 'light_candle_task' so it can cancel it.
+    #     monitor_task = asyncio.create_task(
+    #         monitor_candle_lighting(robot, light_candle_task)
+    #     )
+
+    #     # 3. Wait for the monitoring task to complete.
+    #     #    The monitor will exit when EITHER the candle is lit
+    #     #    OR the 'light_candle' task finishes on its own.
+    #     await monitor_task
+        
+    #     # 4. We must also 'await' the main task.
+    #     #    - If it was cancelled, this will raise asyncio.CancelledError.
+    #     #    - If it finished normally (timed out), this will return its result.
+    #     #    This is crucial for proper exception handling.
+    #     try:
+    #         await light_candle_task
+    #     except asyncio.CancelledError:
+    #         print("[Supervisor] Confirmed 'light_candle_task' was successfully cancelled.")
+
+    #     print("--- SUPERVISOR: TASK 3 COMPLETE (or cancelled) ---")
+
+
+    #     # --- Task 4: Retract Arm (Conditional) ---
+    #     # This is the final step: only retract if the candle was lit.
+    #     # We check the robot's state, which was set by the perception check.
+        
+    #     if robot.candle_is_actually_lit:
+    #         print("\n--- SUPERVISOR: STARTING TASK 4: RETRACT ARM ---")
+    #         await robot.run_model("retract_arm")
+    #         print("--- SUPERVISOR: TASK 4 COMPLETE ---")
+    #         print("\nMISSION SUCCESSFUL. Robot is home.")
+    #     else:
+    #         print("\n--- SUPERVISOR: Candle was not lit. Mission failed. ---")
+    #         print("--- SUPERVISOR: Arm will not retract. Manual intervention required. ---")
+
+    # except Exception as e:
+    #     print(f"\n--- SUPERVISOR: An unexpected error occurred: {e} ---")
+    #     # Add any emergency stop logic here
+    #     await robot.run_model("retract_arm") # Example of a safety fallback
 
 
 if __name__ == "__main__":
