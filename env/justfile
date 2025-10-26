@@ -1,4 +1,4 @@
-project_folder := "/home/ubuntu"
+project_folder := "/home/ubuntu/act"
 
 default:
   just --list
