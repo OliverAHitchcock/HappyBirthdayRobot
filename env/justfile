@@ -57,12 +57,12 @@ record-lighter num_episodes='29' id='record-lighter' task='Light the candle.':
 
 train-act:
   uv run lerobot-train \
-      --dataset.repo_id=felixmayor/record-candle-mei2 \
+      --dataset.repo_id=felixmayor/record-lighter-cake \
       --policy.type=act \
       --output_dir={{ project_folder }}/outputs/act_candle \
       --job_name=ACT_candle_training \
-      --policy.repo_id=gyger/act_candle2 \
-      --wandb.enable=true \
+      --policy.repo_id=gyger/act_lightcandle \
+      --wandb.enable=false \
       --steps=30000 \
       --batch_size=32 \
       --save_freq=5000 \
