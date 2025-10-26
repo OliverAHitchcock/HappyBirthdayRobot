@@ -16,8 +16,10 @@ setup-gr00t:
   uv venv && \
   uv pip install "torch>=2.2.1,<2.8.0" "torchvision>=0.21.0,<0.23.0" && \
   uv pip install ninja "packaging>=24.2,<26.0" && \
-  uv pip install "flash-attn>=2.5.9,<3.0.0" && \
-  uv pip install -e .[all,groot]
+  uv pip install "flash-attn>=2.5.9,<3.0.0" --no-build-isolation && \
+  uv pip install -e .[all,groot] && \
+  uv pip uninstall transformers && \
+  uv pip install transformers
 
 train-lerobot-grootn15:
   uv run lerobot-train \
