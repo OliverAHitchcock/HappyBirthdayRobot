@@ -13,6 +13,8 @@ from helper import *
 from google import genai
 from google.genai import types
 from supervisor import run_vision_model
+import serial
+serial_port = '/dev/ttyACM2'
 if sys.platform.startswith('win'):
     import msvcrt
 else:
@@ -137,7 +139,7 @@ class RobotAPI:
             if model_name == State.PLACE_CANDLE:
                 # Simulate the time taken to place the candle
 
-                duration = 20.0
+                duration = 10.0
                 interval = 0.1
                 steps = int(duration / interval)
 
@@ -164,6 +166,10 @@ class RobotAPI:
                     await asyncio.sleep(interval)
 
                 print("[Robot] 'light_candle' model timed out (finished naturally).")
+                ser = serial.Serial(serial_port, 9600)  # open serial port
+                print(ser.name)         # check which port was really used
+                ser.write(b’1')     # write a string
+                ser.close()             # close port
 
             elif model_name == State.RETRACT_ARM:
                 await asyncio.sleep(4)
@@ -344,81 +350,6 @@ async def main():
             print(f"[Supervisor][FSM] Unknown state: {cur_state}")
             break
     # end TODO
-
-'''
-working fallback code
-'''
-
-    # try:
-    #     # --- Task 1: Place Candle ---
-    #     print("\n--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE ---")
-    #     await robot.run_model("place_candle")
-    #     print("--- SUPERVISOR: TASK 1 COMPLETE ---")
-
-
-    #     # --- Task 2: Verify Placement ---
-    #     print("\n--- SUPERVISOR: STARTING TASK 2: VERIFY PLACEMENT ---")
-    #     # is_placed = await robot.query_vision_model()
-    #     # is_placed = False
-    #     is_placed = True
-        
-    #     if not is_placed:
-    #         print("--- SUPERVISOR: VERIFICATION FAILED. Aborting mission. ---")
-    #         return
-        
-    #     print("--- SUPERVISOR: TASK 2 COMPLETE. Placement verified. ---")
-
-
-    #     # --- Task 3: Light Candle (with Active Supervision) ---
-    #     print("\n--- SUPERVISOR: STARTING TASK 3: LIGHT CANDLE (with active monitoring) ---")
-        
-    #     # 1. Create the task for the 'light_candle' model.
-    #     #    This starts the task running in the background.
-    #     light_candle_task = asyncio.create_task(
-    #         robot.run_model("light_candle")
-    #     )
-        
-    #     # 2. Create the concurrent monitoring task.
-    #     #    We pass it a reference to the 'light_candle_task' so it can cancel it.
-    #     monitor_task = asyncio.create_task(
-    #         monitor_candle_lighting(robot, light_candle_task)
-    #     )
-
-    #     # 3. Wait for the monitoring task to complete.
-    #     #    The monitor will exit when EITHER the candle is lit
-    #     #    OR the 'light_candle' task finishes on its own.
-    #     await monitor_task
-        
-    #     # 4. We must also 'await' the main task.
-    #     #    - If it was cancelled, this will raise asyncio.CancelledError.
-    #     #    - If it finished normally (timed out), this will return its result.
-    #     #    This is crucial for proper exception handling.
-    #     try:
-    #         await light_candle_task
-    #     except asyncio.CancelledError:
-    #         print("[Supervisor] Confirmed 'light_candle_task' was successfully cancelled.")
-
-    #     print("--- SUPERVISOR: TASK 3 COMPLETE (or cancelled) ---")
-
-
-    #     # --- Task 4: Retract Arm (Conditional) ---
-    #     # This is the final step: only retract if the candle was lit.
-    #     # We check the robot's state, which was set by the perception check.
-        
-    #     if robot.candle_is_actually_lit:
-    #         print("\n--- SUPERVISOR: STARTING TASK 4: RETRACT ARM ---")
-    #         await robot.run_model("retract_arm")
-    #         print("--- SUPERVISOR: TASK 4 COMPLETE ---")
-    #         print("\nMISSION SUCCESSFUL. Robot is home.")
-    #     else:
-    #         print("\n--- SUPERVISOR: Candle was not lit. Mission failed. ---")
-    #         print("--- SUPERVISOR: Arm will not retract. Manual intervention required. ---")
-
-    # except Exception as e:
-    #     print(f"\n--- SUPERVISOR: An unexpected error occurred: {e} ---")
-    #     # Add any emergency stop logic here
-    #     await robot.run_model("retract_arm") # Example of a safety fallback
-
 
 if __name__ == "__main__":
     print("Starting Robotics Supervisor Program...")
