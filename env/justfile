@@ -201,12 +201,12 @@ setup-gr00t:
 setup:
   cd {{ project_folder }} && \
   sudo apt install svt-av1 ffmpeg && \
-  UV_PYTHON=python3.10 uv init --bare --python-pin && \
+  UV_PYTHON=python3.10 uv init && \
+  uv venv && \
   mkdir outputs && \
   mkdir vendor && cd vendor && \
-  git config --global credenital.helper store && \
+  git config --global credential.helper store && \
   git clone https://github.com/huggingface/lerobot.git && \
   cd lerobot && \
   git checkout v0.4.0 && \
-  uv venv && \
   uv pip install -e .[all]
