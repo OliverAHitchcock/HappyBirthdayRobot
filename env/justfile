@@ -1,3 +1,5 @@
+project_folder := "{{justfile_directory()}}"
+
 project_folder := "/home/ubuntu/act"
 
 default:
@@ -72,14 +74,14 @@ refine-act:
   uv run lerobot-train \
       --dataset.repo_id=felixmayor/record-candle-varied \
       --policy.type=act \
-      --policy.pretrained_path=gyger/act_candle \
+      --policy.pretrained_path=gyger/act_lightcandle \
       --output_dir={{ project_folder }}/outputs/act_candle_refine \
       --job_name=ACT_candle_refine_training \
       --policy.repo_id=gyger/act_candle_varied \
-      --wandb.enable=true \
+      --wandb.enable=false \
       --steps=10000 \
       --batch_size=32 \
-      --save_freq=5000 \
+      --save_freq=1000 \
       --policy.device=cuda
 
 train-pi05:
@@ -185,7 +187,7 @@ setup-uv:
 setup-gr00t:
   cd {{ project_folder }} && \
   sudo apt install svt-av1 ffmpeg && \
-  UV_PYTHON=python3.10 uv init --bare --python-pin && \
+  UV_PYTHON=python3.10 uv init; && \
   mkdir outputs && \
   mkdir vendor && cd vendor && \
   git config --global credential.helper store && \
@@ -193,15 +195,17 @@ setup-gr00t:
   cd lerobot && \
   git checkout v0.4.0 && \
   uv venv && \
-  uv pip install "torch>=2.2.1,<2.8.0" "torchvision>=0.21.0,<0.23.0" --no-build-isolation && \
+  uv pip install "torch>=2.2.1,<2.8.0" "torchvision>=0.21.0,<0.23.0" && \
   uv pip install ninja "packaging>=24.2,<26.0"s && \
   uv pip install "flash-attn>=2.5.9,<3.0.0" --no-build-isolation && \
-  uv pip install -e .[all,groot]
+  uv pip install -e .[all,groot] && \
+  uv pip uninstall transformers && \
+  uv pip install transformers
 
 setup:
   cd {{ project_folder }} && \
   sudo apt install svt-av1 ffmpeg && \
-  UV_PYTHON=python3.10 uv init && \
+  UV_PYTHON=python3.10 uv init; \
   uv venv && \
   mkdir outputs && \
   mkdir vendor && cd vendor && \

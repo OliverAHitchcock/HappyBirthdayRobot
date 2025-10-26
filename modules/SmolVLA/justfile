@@ -1,4 +1,4 @@
-project_folder := "/home/ubuntu/smolvla"
+project_folder := "{{justfile_directory()}}"
 
 default:
   just --list

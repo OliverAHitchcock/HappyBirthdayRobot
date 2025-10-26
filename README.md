@@ -52,7 +52,7 @@ Follow these steps to get HappyBirthdayRobot running in minutes:
 2. **Create and activate a Python environment (recommended: uv)**
    ```powershell
    uv venv --python 3.10
-   .\.venv\Scripts\activate
+   .\.venv\scripts\activate
    ```
 
 3. **Install dependencies**
