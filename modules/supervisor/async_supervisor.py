@@ -4,7 +4,7 @@ import random
 from typing import Optional
 import sys
 import cv2
-# from cv2 import *
+from run_shell_cmd import *
 from enum import Enum
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -15,18 +15,24 @@ from google.genai import types
 from supervisor import run_vision_model
 import serial
 
-if sys.platform.startswith('win'):
-    import msvcrt
-else:
-    import getch
+# if sys.platform.startswith('win'):
+#     import msvcrt
+# else:
+#     import getch
 
-serial_port = '/dev/ttyACM2'
+serial_port = '/dev/ttyACM0'
 
 # Get current directory
 current_directory = os.getcwd()
 images_directory = os.path.join(current_directory, "modules/supervisor/images/")
+print("images directory", images_directory)
 img_name = "frame.jpg"
-img_path = os.path.join(images_directory, img_name)
+linux = True
+n_camera = 2
+img_path = img_name
+if (not linux):
+    n_camera = 0
+    img_path = os.path.join(images_directory, img_name)
 # Load the environment variables
 load_dotenv(Path(f"{current_directory}/.env"))
 
@@ -78,7 +84,7 @@ def read_single_key():
 
 async def take_picture(img_path: str):
     # Open the default camera
-    cam = cv2.VideoCapture(0)
+    cam = cv2.VideoCapture(n_camera) # TODO change camera
     print("Camera opened")
     print("Waiting for 2 seconds...")
     time.sleep(2)
@@ -140,16 +146,54 @@ class RobotAPI:
         try:
             if model_name == State.PLACE_CANDLE:
                 # Simulate the time taken to place the candle
+                run_shell_command([
+                    'rm', '-r', '/home/seeed/.cache/huggingface/lerobot/outputs/eval_so101_candle'
+                ])
+                run_shell_command([
+                    'pwd'
+                ])
+                os.chdir('/home/seeed/Documents/hackathon/HappyBirthdayRobot/env')
+                
+                # run_shell_command([
+                #     'just', 'teleoperate'
+                # ])
 
-                duration = 10.0
-                interval = 0.1
-                steps = int(duration / interval)
+                await run_shell_command_async([
+                    'just', 'run-candle-act', '\n'
+                ])
 
-                # Print a counter every `interval` seconds to simulate progress.
-                for i in range(steps):
-                    # Show which step we're on so output demonstrates concurrency.
-                    print(f"[Robot][light_candle] running... {i+1}")
-                    await asyncio.sleep(interval)
+                await run_shell_command_async([
+                    '\n'
+                ])
+
+                # run_shell_command([
+                #     "uv", "run", "lerobot-record",
+                #     "--robot.type=so100_follower",
+                #     "--robot.port=/dev/ttyACM2",
+                #     "--robot.id=ht_follower_arm",
+                    
+                #     """--robot.cameras={ 
+                #     "fpv":  {"type": "opencv", "index_or_path": 0, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, 
+                #     "top":  {"type": "opencv", "index_or_path": 2, "width": 1280, "height": 720, "fps": 30}, 
+                #     "side": {"type": "opencv", "index_or_path": 8, "width": 640, "height": 480, "fps": 30}}""",
+
+
+                #     "--display_data=true",
+                #     "--dataset.push_to_hub=False",
+                #     "--dataset.repo_id=outputs/eval_so101_candle",
+                #     "--policy.path=gyger/act-candle-cake",
+                #     "--dataset.episode_time_s=3600",
+                #     "--dataset.single_task='Grab the candle and place it into the cake.'"
+                # ])
+                # duration = 10.0
+                # interval = 0.1
+                # steps = int(duration / interval)
+
+                # # Print a counter every `interval` seconds to simulate progress.
+                # for i in range(steps):
+                #     # Show which step we're on so output demonstrates concurrency.
+                #     print(f"[Robot][light_candle] running... {i+1}")
+                #     await asyncio.sleep(interval)
                 print("[Robot] 'place_candle' model finished.")
                 
             elif model_name == State.LIGHT_CANDLE:
@@ -157,9 +201,27 @@ class RobotAPI:
                 # Simulate a long-running model that reports progress every 0.1s
                 # so we can observe that the supervisor and model run in parallel.
 
-                duration = 10.0
-                interval = 0.1
-                steps = int(duration / interval)
+                run_shell_command([
+                    'rm', '-r', '/home/seeed/.cache/huggingface/lerobot/outputs/eval_so101_candle'
+                ])
+                run_shell_command([
+                    'pwd'
+                ])
+                os.chdir('/home/seeed/Documents/hackathon/HappyBirthdayRobot/env')
+                
+
+                run_shell_command([
+                    'just', 'run-light-candle'
+                ])
+
+                run_shell_command([
+                    '\n'
+                ])
+
+                # ser = serial.Serial(serial_port, 9600)  # open serial port
+                # duration = 10.0
+                # interval = 0.1
+                # steps = int(duration / interval)
 
                 # Print a counter every `interval` seconds to simulate progress.
                 for i in range(steps):
@@ -233,7 +295,7 @@ class RobotAPI:
 async def monitor_general(
     robot: RobotAPI, 
     main_task: asyncio.Task, 
-    check_interval: float = 5.0,
+    check_interval: float = 60.0,
     function_to_check: callable=lambda x: x.is_candle_in_cake
 ):
     """
@@ -303,7 +365,7 @@ async def main():
                 # 2. Create the concurrent monitoring task.
                 #    We pass it a reference to the 'light_candle_task' so it can cancel it.
                 # monitor_place_candle_task = asyncio.create_task(monitor_place_candle(robot, place_candle_task, check_interval=5.0))
-                monitor_place_candle_task = asyncio.create_task(monitor_general(robot, place_candle_task, check_interval=5.0, function_to_check=lambda x: x.is_candle_in_cake))
+                monitor_place_candle_task = asyncio.create_task(monitor_general(robot, place_candle_task, check_interval=30.0, function_to_check=lambda x: x.is_candle_in_cake))
 
                 # 3. Wait for the monitoring task to complete.
                 #    The monitor will exit when EITHER the candle is lit
