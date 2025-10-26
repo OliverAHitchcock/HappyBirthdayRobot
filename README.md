@@ -20,7 +20,7 @@ The environment is designed to be static and low-noise. White printer paper and 
 Three cameras are used to view the scene:
 - **Camera 1:** An FPV camera mounted on the robot arm for close-up views of the gripper, aiding fine manipulation.
 - **Camera 2:** A webcam positioned high and to the side, providing an angled overview of the entire workspace.
-- **Camera 3:** An Orbbec Gemini 2 depth camera for 3D perception.
+- **Camera 3:** An Orbbec Gemini 2 depth camera provides medium-height side view.
 
 ### Robot Arm
 
@@ -31,6 +31,10 @@ A custom 3D-printed mount holds the camera and provides locations for optional m
 In principle, the multiple-mirrors technique enables a single camera to capture three different angles, approximating the utility of a depth camera (at the cost of reduced field of view). In practice, the FPV camera used here has too narrow a field of view for the mirror technique to be effective; the required mirror angles sacrifice too much of the camera's usable view. A wider FOV or fisheye lens would make this approach more practical.
 
 The USB-controlled lighter is a low-cost plasma arc lighter, hotwired to bypass its on-off switch and directly connect battery power to the plasma element when an external relay is activated. The relay is mounted on an Arduino board, which connects to the control computer via USB. A serial 9600 baud connection is used to trigger the relay and control the lighter.
+
+The lighter is normal butane gas lighter that has been hacked for usb control. A simple custom 3D printed assembly holds the ligher and a servo motor. The servo motor is attached to a elliptical disk which when rotates depresses the ligher click mechanism, striking the flame. The servo motor is wired up to a relay which is mounted on an Arduino board, which connects to the control computer via USB. A serial 9600 baud connection is used to trigger the relay and turn the lighter on-off.
+
+The lighter is a low-cost plasma arc lighter, hotwired to bypass its on-off switch and directly connect battery power to the plasma element when an external relay is activated. The relay is mounted on an Arduino board, which connects to the control computer via USB. A serial 9600 baud connection is used to trigger the relay and control the lighter.
 
 ## Robot Control
 ### Folder Structure
