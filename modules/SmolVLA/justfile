@@ -1,0 +1,37 @@
+project_folder := "/home/ubuntu/smolvla"
+
+default:
+  just --list
+
+setup:
+  cd {{ project_folder }} && \
+  sudo apt install svt-av1 ffmpeg && \
+  UV_PYTHON=python3.10 uv init && \
+  uv venv && \
+  mkdir outputs && \
+  mkdir vendor && cd vendor && \
+  git config --global credential.helper store && \
+  git clone https://github.com/huggingface/lerobot.git && \
+  cd lerobot && \
+  git checkout v0.4.0 && \
+  uv pip install -e . && \
+  uv pip install -e .[smolvla]
+
+train-lerobot-smolvla:
+  uv run lerobot-train \
+      --dataset.repo_id=felixmayor/record-candle-cake \
+      --job_name=smolvla_candle_cake \
+      --output_dir={{ project_folder }}/outputs/train/smolvla_candle_cake \
+      --policy.type=smolvla \
+      --policy.push_to_hub=true \
+      --policy.repo_id=gyger/smolvla_candle-cake \
+      --wandb.enable=false \
+      --wandb.disable_artifact=true \
+      --save_checkpoint=true \
+      --log_freq=100 \
+      --save_freq=5000 \
+      --steps=50000 \
+      --policy.device=cuda \
+      --policy.max_action_dim=6 \
+      --policy.max_state_dim=6 \
+      --batch_size=32
