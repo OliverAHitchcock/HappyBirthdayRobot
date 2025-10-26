@@ -1,16 +1,39 @@
 # HappyBirthdayRobot
 
-A robotics hackathon project to automate the process of placing and lighting a birthday candle using a simulated robot and supervisor logic. The project demonstrates asynchronous control, perception, and manual override via keyboard input.
+A robotics hackathon project to automate the process of placing and lighting a birthday candle using a robot arm and supervisor logic. The project demonstrates asynchronous control, perception, and manual override via keyboard input.
 
 ## Features
 
+- Hardware Hacked SO-101 seeedstudio robot arm
 - Simulated robot API (`RobotAPI`) for placing and lighting candles
 - Supervisor logic for orchestrating multi-step tasks
 - Active monitoring and manual override: press any key to instantly light the candle
 - Asynchronous concurrency: robot model and supervisor run in parallel
 - Progress feedback: prints numbers every 0.1s during candle lighting to show async operation
 
-## Folder Structure
+## Hardware
+
+### Environment
+
+The environment is designed to be static and low-noise. White printer paper and poster boards surround the scene, providing high contrast for object detection and minimizing background distractions. An optical breadboard offers secure, rigid mounting points for the cameras and robotic arm.
+
+Three cameras are used to view the scene:
+- **Camera 1:** An FPV camera mounted on the robot arm for close-up views of the gripper, aiding fine manipulation.
+- **Camera 2:** A webcam positioned high and to the side, providing an angled overview of the entire workspace.
+- **Camera 3:** An Orbbec Gemini 2 depth camera for 3D perception.
+
+### Robot Arm
+
+The SO-101 robot arm by Seeed Studio serves as the base platform, with several modifications to enable candle lighting.
+
+A custom 3D-printed mount holds the camera and provides locations for optional mirrors, enhancing the FPV camera's view and allowing attachment of a USB-controlled lighter.
+
+In principle, the multiple-mirrors technique enables a single camera to capture three different angles, approximating the utility of a depth camera (at the cost of reduced field of view). In practice, the FPV camera used here has too narrow a field of view for the mirror technique to be effective; the required mirror angles sacrifice too much of the camera's usable view. A wider FOV or fisheye lens would make this approach more practical.
+
+The USB-controlled lighter is a low-cost plasma arc lighter, hotwired to bypass its on-off switch and directly connect battery power to the plasma element when an external relay is activated. The relay is mounted on an Arduino board, which connects to the control computer via USB. A serial 9600 baud connection is used to trigger the relay and control the lighter.
+
+## Robot Control
+### Folder Structure
 
 ```
 modules/
@@ -24,13 +47,13 @@ modules/
       test1.jpg
 ```
 
-## Requirements
+### Requirements
 
 - Python 3.10+
 - Windows (uses `msvcrt` for keyboard input)
 - [uv](https://github.com/astral-sh/uv) package manager (recommended for environment setup)
 
-## Setup
+### Setup
 
 1. Create and activate a Python environment (recommended: use `uv`):
 
@@ -45,7 +68,7 @@ modules/
    uv pip install -U <package-name>
    ```
 
-## Running the Supervisor
+### Running the Supervisor
 
 Navigate to the project root and run:
 
@@ -57,14 +80,14 @@ python modules/supervisor/async_supervisor.py
 - During the lighting phase, press any key to instantly mark the candle as lit and cancel the lighting task.
 - Progress numbers print every 0.1s to show the async model is running.
 
-## How It Works
+### How It Works
 
 - The supervisor orchestrates a sequence: place candle → verify placement → light candle (with monitoring) → retract arm.
 - The robot's `light_candle` model runs for 30 seconds, printing progress every 0.1s.
 - The supervisor monitors for the candle being lit, either by perception or manual keypress.
 - Manual override: press any key to flip the candle lit variable and cancel the lighting task.
 
-## Enhanced Supervision: Vision Model & Real-Time Feedback
+### Enhanced Supervision: Vision Model & Real-Time Feedback
 
 Recent updates to the supervision script add real perception and feedback:
 
@@ -73,7 +96,7 @@ Recent updates to the supervision script add real perception and feedback:
 - **Detailed Robot State:** The robot tracks multiple state variables (e.g., `claw_has_candle`, `is_flame_lit`, `is_candle_in_cake`, `is_arm_retracted`, and `instructions`) for richer supervision and feedback.
 - **Feedback Loop:** The supervisor queries the vision model after each action, parses the response, and updates the robot's state accordingly.
 
-### Example: Vision Model Feedback
+#### Example: Vision Model Feedback
 After placing the candle, the supervisor captures an image and sends it to the vision model. The model returns a JSON response with detected objects, next state, and instructions, which the supervisor uses to decide the next action.
 
 ```python
@@ -83,27 +106,27 @@ response_json = await robot.query_vision_model(img_path)
 robot.set_robot_state(response_json)
 ```
 
-### Updated Tutorial Steps
+#### Updated Tutorial Steps
 - The supervisor will now use your webcam to capture images and verify each step.
 - Vision model feedback is used to determine if the candle is placed, lit, and if the arm should retract.
 - The robot's state is updated in real time based on vision model output.
 
-#### Example Output (Vision Model)
+##### Example Output (Vision Model)
 ```
 {"current_state": "pick_up_candle", "next_state": "light_candle", ...}
 Instructions: The claw should light the candle next.
 ```
 
-## Asynchronous Supervision: How It Works
+### Asynchronous Supervision: How It Works
 
 A key innovation in HappyBirthdayRobot is its use of asynchronous programming to supervise robotic models in real time. This approach allows the supervisor to monitor, intervene, and coordinate multiple tasks concurrently—just like a real-world robotics system.
 
-### Why Asynchronous Supervision?
+#### Why Asynchronous Supervision?
 - **Responsiveness:** The supervisor can react instantly to events (like a candle being lit or a manual override) without waiting for long-running tasks to finish.
 - **Parallelism:** Robot models (e.g., lighting the candle) run in the background, while the supervisor checks sensors, listens for user input, and manages state transitions.
 - **Safety and Control:** The supervisor can cancel or redirect tasks based on perception or user actions, ensuring robust and flexible operation.
 
-### Implementation Details
+#### Implementation Details
 - The supervisor and robot models are implemented as Python `async` coroutines using `asyncio`.
 - The main robot model (e.g., `light_candle`) runs as an `asyncio.Task`, simulating a long-running process with progress prints every 0.1s.
 - The supervisor launches a concurrent monitoring coroutine (`monitor_candle_lighting`) that:
@@ -112,7 +135,7 @@ A key innovation in HappyBirthdayRobot is its use of asynchronous programming to
   - Cancels the robot's task immediately if the candle is lit or a key is pressed
 - This design ensures the supervisor can always intervene, demonstrating true parallelism and control.
 
-#### Example: Supervisor and Model Running in Parallel
+##### Example: Supervisor and Model Running in Parallel
 ```python
 # Start the robot model as a background task
 light_candle_task = asyncio.create_task(robot.run_model("light_candle"))
@@ -126,17 +149,17 @@ await monitor_task
 
 - While the robot prints progress every 0.1s, the supervisor can instantly respond to perception or user input, cancelling the model and moving to the next step.
 
-## Hackathon Goals
+### Hackathon Goals
 
 - Demonstrate async robotics control and supervision
 - Enable manual intervention for rapid prototyping
 - Provide clear feedback for parallel task execution
 
-## License
+### License
 
 See `LICENSE` for details.
 
-## Quickstart
+### Quickstart
 
 Follow these steps to get HappyBirthdayRobot running in minutes:
 
@@ -170,23 +193,23 @@ Follow these steps to get HappyBirthdayRobot running in minutes:
 
 ---
 
-## Tutorial: Build and Run Your Own Birthday Robot
+### Tutorial: Build and Run Your Own Birthday Robot
 
-### 1. Project Overview
+#### 1. Project Overview
 This project simulates a robot that can place and light a birthday candle, with a supervisor orchestrating the steps and monitoring progress. You can manually override the process by pressing any key during the lighting phase.
 
-### 2. Environment Setup
+#### 2. Environment Setup
 - Make sure you have Python 3.10+ and are on Windows (for keyboard input).
 - Use the [uv](https://github.com/astral-sh/uv) package manager for fast environment creation and package installs.
 
-### 3. Running the Supervisor
+#### 3. Running the Supervisor
 - Open a terminal in the project root.
 - Activate your environment and run:
   ```powershell
   python modules/supervisor/async_supervisor.py
   ```
 
-### 4. What to Expect
+#### 4. What to Expect
 - The supervisor will print messages as it moves through each task:
   - Placing the candle
   - Verifying placement
@@ -194,7 +217,7 @@ This project simulates a robot that can place and light a birthday candle, with 
   - Retracting the arm
 - During the lighting phase, press any key to instantly light the candle and see the supervisor react.
 
-#### Example Output
+##### Example Output
 ```
 --- SUPERVISOR: STARTING TASK 1: PLACE CANDLE ---
 [Robot] Received command: run_model('place_candle')
@@ -213,7 +236,7 @@ This project simulates a robot that can place and light a birthday candle, with 
 ...existing output...
 ```
 
-### 5. Customization
+#### 5. Customization
 - You can modify the supervisor or robot logic in `modules/supervisor/async_supervisor.py`.
 - Try changing the timing, adding new steps, or integrating with real hardware!
 
