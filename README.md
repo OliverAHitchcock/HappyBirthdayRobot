@@ -36,7 +36,74 @@ The lighter is normal butane gas lighter that has been hacked for usb control. A
 
 The lighter is a low-cost plasma arc lighter, hotwired to bypass its on-off switch and directly connect battery power to the plasma element when an external relay is activated. The relay is mounted on an Arduino board, which connects to the control computer via USB. A serial 9600 baud connection is used to trigger the relay and control the lighter.
 
+
 ## Robot Control
+
+### Tutorial & Quickstart: Build and Run Your Own Birthday Robot
+
+Follow these steps to get HappyBirthdayRobot running in minutes:
+
+1. **Clone the repository**
+   ```powershell
+   git clone https://github.com/OliverAHitchcock/HappyBirthdayRobot.git
+   cd HappyBirthdayRobot
+   ```
+
+2. **Create and activate a Python environment (recommended: uv)**
+   ```powershell
+   uv venv --python 3.10
+   .\.venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+   (If you need extra packages, install them with uv pip)
+   ```powershell
+   uv pip install -U <package-name>
+   ```
+
+4. **Run the supervisor demo**
+   ```powershell
+   python modules/supervisor/async_supervisor.py
+   ```
+
+5. **Interact**
+   - The robot will place and light a candle using real hardware and sensors.
+   - During the lighting phase, press any key to instantly trigger the candle lighting via hardware control and cancel the lighting task.
+   - Progress feedback prints every 0.1s to show the hardware model is running and supervised asynchronously.
+
+#### What to Expect
+The supervisor will print messages as it moves through each hardware-controlled task:
+   - Placing the candle
+   - Verifying placement with camera and vision model
+   - Lighting the candle (prints numbers every 0.1s as the hardware runs)
+   - Retracting the arm
+During the lighting phase, press any key to instantly trigger the hardware lighter and see the supervisor react.
+
+##### Example Output
+```
+--- SUPERVISOR: STARTING TASK 1: PLACE CANDLE ---
+[Robot] Received command: run_model('place_candle')
+[Robot] 'place_candle' model finished.
+--- SUPERVISOR: TASK 1 COMPLETE ---
+...existing output...
+[Robot][light_candle] running... 1
+[Robot][light_candle] running... 2
+... (prints every 0.1s) ...
+[Keyboard] Key pressed: a. Marking candle as lit.
+[Keyboard] Cancelling 'light_candle' model due to manual key press.
+[Supervisor] MONITOR: SUCCESS! Candle is lit.
+[Supervisor] MONITOR: Cancelling 'light_candle' model now.
+--- SUPERVISOR: TASK 3 COMPLETE (or cancelled) ---
+--- SUPERVISOR: STARTING TASK 4: RETRACT ARM ---
+...existing output...
+```
+
+##### Customization
+- You can modify the supervisor or robot logic in `modules/supervisor/async_supervisor.py` to adapt to different hardware setups, sensors, or control strategies.
+- Try changing the timing, adding new steps, or integrating with additional sensors and actuators!
+
+---
+
 ### Folder Structure
 
 ```
@@ -56,40 +123,6 @@ modules/
 - Python 3.10+
 - Windows (uses `msvcrt` for keyboard input)
 - [uv](https://github.com/astral-sh/uv) package manager (recommended for environment setup)
-
-### Setup
-
-1. Create and activate a Python environment (recommended: use `uv`):
-
-   ```powershell
-   uv venv --python 3.10
-   .\.venv\Scripts\activate
-   ```
-
-2. Install dependencies (if any):
-
-   ```powershell
-   uv pip install -U <package-name>
-   ```
-
-### Running the Supervisor
-
-Navigate to the project root and run:
-
-```powershell
-python modules/supervisor/async_supervisor.py
-```
-
-- The robot will simulate placing and lighting a candle.
-- During the lighting phase, press any key to instantly mark the candle as lit and cancel the lighting task.
-- Progress numbers print every 0.1s to show the async model is running.
-
-### How It Works
-
-- The supervisor orchestrates a sequence: place candle → verify placement → light candle (with monitoring) → retract arm.
-- The robot's `light_candle` model runs for 30 seconds, printing progress every 0.1s.
-- The supervisor monitors for the candle being lit, either by perception or manual keypress.
-- Manual override: press any key to flip the candle lit variable and cancel the lighting task.
 
 ### Enhanced Supervision: Vision Model & Real-Time Feedback
 
@@ -123,21 +156,21 @@ Instructions: The claw should light the candle next.
 
 ### Asynchronous Supervision: How It Works
 
-A key innovation in HappyBirthdayRobot is its use of asynchronous programming to supervise robotic models in real time. This approach allows the supervisor to monitor, intervene, and coordinate multiple tasks concurrently—just like a real-world robotics system.
+HappyBirthdayRobot uses asynchronous programming to supervise real hardware tasks in real time. The supervisor coordinates and monitors multiple hardware actions concurrently, enabling instant intervention and robust control.
 
 #### Why Asynchronous Supervision?
-- **Responsiveness:** The supervisor can react instantly to events (like a candle being lit or a manual override) without waiting for long-running tasks to finish.
-- **Parallelism:** Robot models (e.g., lighting the candle) run in the background, while the supervisor checks sensors, listens for user input, and manages state transitions.
-- **Safety and Control:** The supervisor can cancel or redirect tasks based on perception or user actions, ensuring robust and flexible operation.
+- **Responsiveness:** The supervisor can react instantly to events (like a candle being lit or a manual override) without waiting for long-running hardware tasks to finish.
+- **Parallelism:** Hardware actions (e.g., lighting the candle) run in the background, while the supervisor checks sensors, listens for user input, and manages state transitions.
+- **Safety and Control:** The supervisor can cancel or redirect hardware tasks based on perception or user actions, ensuring robust and flexible operation.
 
 #### Implementation Details
 - The supervisor and robot models are implemented as Python `async` coroutines using `asyncio`.
-- The main robot model (e.g., `light_candle`) runs as an `asyncio.Task`, simulating a long-running process with progress prints every 0.1s.
+- The main robot model (e.g., `light_candle`) runs as an `asyncio.Task`, controlling hardware and printing progress every 0.1s.
 - The supervisor launches a concurrent monitoring coroutine (`monitor_candle_lighting`) that:
-  - Periodically checks if the candle is lit (via simulated perception)
-  - Listens for keyboard input in a background thread (using `msvcrt.getch` and `asyncio.to_thread`)
-  - Cancels the robot's task immediately if the candle is lit or a key is pressed
-- This design ensures the supervisor can always intervene, demonstrating true parallelism and control.
+   - Periodically checks if the candle is lit (using real sensors and vision model)
+   - Listens for keyboard input in a background thread (using `msvcrt.getch` and `asyncio.to_thread`)
+   - Cancels the robot's task immediately if the candle is lit or a key is pressed
+- This design ensures the supervisor can always intervene, demonstrating true parallelism and control in hardware deployment.
 
 ##### Example: Supervisor and Model Running in Parallel
 ```python
@@ -151,7 +184,7 @@ monitor_task = asyncio.create_task(monitor_candle_lighting(robot, light_candle_t
 await monitor_task
 ```
 
-- While the robot prints progress every 0.1s, the supervisor can instantly respond to perception or user input, cancelling the model and moving to the next step.
+- While the robot prints progress every 0.1s, the supervisor can instantly respond to perception or user input, cancelling the hardware model and moving to the next step.
 
 ### Hackathon Goals
 
