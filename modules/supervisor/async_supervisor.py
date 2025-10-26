@@ -14,11 +14,13 @@ from google import genai
 from google.genai import types
 from supervisor import run_vision_model
 import serial
-serial_port = '/dev/ttyACM2'
+
 if sys.platform.startswith('win'):
     import msvcrt
 else:
     import getch
+
+serial_port = '/dev/ttyACM2'
 
 # Get current directory
 current_directory = os.getcwd()
@@ -168,7 +170,7 @@ class RobotAPI:
                 print("[Robot] 'light_candle' model timed out (finished naturally).")
                 ser = serial.Serial(serial_port, 9600)  # open serial port
                 print(ser.name)         # check which port was really used
-                ser.write(b’1')     # write a string
+                ser.write(b'1')     # write a string
                 ser.close()             # close port
 
             elif model_name == State.RETRACT_ARM:
@@ -191,7 +193,7 @@ class RobotAPI:
             if model_name == "light_candle":
                 self._lighting_start_time = None
 
-    async def query_vision_model(self, img_path: str) -> bool:
+    def query_vision_model(self, img_path: str) -> dict:
         with open(img_path, 'rb') as f:
             image_bytes = f.read()
         image_response = client.models.generate_content(
@@ -211,14 +213,19 @@ class RobotAPI:
         return json_repair.loads(image_response.text)
 
 
-    async def picture_and_run_vision_model(self) -> dict:
+    async def picture_and_run_vision_model(self, use_api: bool = True) -> dict:
         # Open the default camera
         await take_picture(img_path)
         # Run the vision model
         # response_json = run_vision_model(img_path)
         # Set the robot state
-        # self.set_robot_state(response_json)
-        response_json = {"current_state": State.IDLE, "next_state": State.LIGHT_CANDLE, "points": [], "claw_has_candle": False, "is_flame_lit": False, "is_candle_in_cake": True, "is_arm_retracted": False, "instructions": ""}
+        if use_api:
+            response_json = self.query_vision_model(img_path)
+            # response_json = run_vision_model(img_path)
+            self.set_robot_state(response_json)
+        else:
+            response_json = {"current_state": State.IDLE, "next_state": State.LIGHT_CANDLE, "points": [], "claw_has_candle": False, "is_flame_lit": False, "is_candle_in_cake": True, "is_arm_retracted": False, "instructions": ""}
+        print(f"[Supervisor] Response JSON: {response_json}")
         return response_json
 
 # --- Supervisor Logic ---
@@ -340,14 +347,14 @@ async def main():
                 is_first_time = True
                 print("[Supervisor][FSM] Candle is lit. Proceeding to retract the arm.")
 
-        elif cur_state == State.RETRACT_ARM:
+        elif robot.current_state == State.RETRACT_ARM:
             print("\n[Supervisor][FSM] State: RETRACT_ARM")
             await robot.run_model("retract_arm")
             print("[Supervisor][FSM] RETRACT_ARM complete. Mission accomplished!")
             break
 
         else:
-            print(f"[Supervisor][FSM] Unknown state: {cur_state}")
+            print(f"[Supervisor][FSM] Unknown state: {robot.current_state}")
             break
     # end TODO
 
