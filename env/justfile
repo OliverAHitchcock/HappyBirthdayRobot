@@ -1,13 +1,11 @@
 project_folder := "{{justfile_directory()}}"
 
-project_folder := "/home/ubuntu/act"
-
 default:
   just --list
 
 teleoperate:
   uv run lerobot-teleoperate \
-    --robot.type=so101_follower --robot.port=/dev/ttyACM4 --robot.id=ht_follower_arm  \
+    --robot.type=so101_follower --robot.port=/dev/ttyACM2 --robot.id=ht_follower_arm  \
     --robot.cameras='{ \
         "fpv": {"type": "opencv", "index_or_path": 2, "width": 1024, "height": 768, "fps": 30, "fourcc": "MJPG"}, \
         "top": {"type": "opencv", "index_or_path": 0, "width": 960, "height": 540, "fps": 30}}'  \
