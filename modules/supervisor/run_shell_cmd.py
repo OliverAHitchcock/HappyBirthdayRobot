@@ -1,33 +1,6 @@
 import subprocess
 import sys
 
-import asyncio
-
-
-async def run_shell_command_async(cmd):
-    print(cmd)
-    try:
-        process = await asyncio.create_subprocess_shell(
-            " ".join(cmd),
-            stdout = asyncio.subprocess.PIPE,
-            stderr = asyncio.subprocess.STDOUT
-        )
-        assert process.stdout
-        async for line in process.stdout:
-            print("robot:", line.decode().rstrip())
-        return await process.wait()
-    except FileNotFoundError as e:
-        # Print the standard output (if any)
-        print(e)
-        # if e.stdout:
-        #     print("\n[Standard Output]:")
-        #     print(e.stdout)
-            
-        # # Print the standard error (most likely where the error message is)
-        # if e.stderr:
-        #     print("\n[Standard Error]:")
-        #     print(e.stderr)
-
 def run_shell_command(command_list):
     """
     Runs a shell command and captures its output and error.

@@ -70,7 +70,7 @@ from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 # no problems in import
 
 @safe_stop_image_writer
-def model_loop(
+def record_loop(
     robot: Robot,
     robot_action_processor: RobotProcessorPipeline[
         tuple[RobotAction, RobotObservation], RobotAction
