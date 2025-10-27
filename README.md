@@ -2,6 +2,8 @@
 
 A robotics hackathon project to automate the process of placing and lighting a birthday candle using a robot arm and supervisor logic. The project demonstrates asynchronous control, perception, and manual override via keyboard input.
 
+https://www.canva.com/design/DAG27Vija9w/pFcQqAcDQsjhxfS3CfqlHQ/watch?utm_content=D[…]hare&utm_medium=link2&utm_source=uniquelinks&utlId=h2496b44a6b
+
 ## Features
 
 - Hardware Hacked SO-101 seeedstudio robot arm
